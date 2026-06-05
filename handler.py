@@ -42,7 +42,7 @@ PROCESSOR = VibeVoiceProcessor.from_pretrained(MODEL_ID)
 
 print(f"[boot] loading model {MODEL_ID} fp16 -> cuda", flush=True)
 MODEL = VibeVoiceForConditionalGenerationInference.from_pretrained(
-    MODEL_ID, torch_dtype=torch.bfloat16, device_map="cuda", attn_implementation="sdpa"
+    MODEL_ID, torch_dtype=torch.float16, device_map="cuda", attn_implementation="sdpa"
 )
 MODEL.eval()
 print("[boot] model ready", flush=True)
