@@ -8,6 +8,8 @@ Input JSON:
     "text": "Hello world. This is a test.",
     "speaker_names": ["Alice"],          // optional, default ["Alice"]
                                           // available: Alice, Carter, Frank, Maya, Mary, Samuel, Anchen, Bowen, Xinran
+    "speaker_audio_url": "https://...",   // optional, overrides speaker_names: clone voice from this WAV/MP3
+    "speaker_audio_b64": "...",           // optional, alternative to URL
     "cfg_scale": 1.3,                    // optional, default 1.3
     "ddpm_steps": 10                     // optional, default 10
   }
@@ -16,7 +18,7 @@ Input JSON:
 Output JSON:
 { "audio_b64": "...", "format": "wav", "sample_rate": 24000, "size_bytes": N }
 """
-import os, sys, base64, io, traceback, tempfile
+import os, sys, base64, io, traceback, tempfile, urllib.request
 import runpod
 
 # Boot diagnostics — appear in worker logs immediately
@@ -56,10 +58,31 @@ def _voice_path(name):
     raise FileNotFoundError(f"no voice file found for '{name}' in {VOICES_DIR}")
 
 
+def _fetch_speaker_audio(url=None, b64=None):
+    # Returns a local file path to a downloaded/decoded audio file.
+    suffix = ".wav"
+    fd, path = tempfile.mkstemp(prefix="ref_", suffix=suffix, dir="/tmp")
+    os.close(fd)
+    if b64:
+        with open(path, "wb") as f:
+            f.write(base64.b64decode(b64))
+        print(f"[handler] decoded speaker_audio_b64 → {path} ({os.path.getsize(path)} B)", flush=True)
+        return path
+    if url:
+        req = urllib.request.Request(url, headers={"User-Agent": "cut-machine/1.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp, open(path, "wb") as f:
+            f.write(resp.read())
+        print(f"[handler] downloaded speaker_audio_url → {path} ({os.path.getsize(path)} B)", flush=True)
+        return path
+    raise ValueError("no speaker_audio_url or speaker_audio_b64 provided")
+
+
 def handler(job):
     try:
         inp = job["input"]
         text = inp["text"]
+        speaker_audio_url = inp.get("speaker_audio_url")
+        speaker_audio_b64 = inp.get("speaker_audio_b64")
         speaker_names = inp.get("speaker_names") or ["Alice"]
         cfg_scale = float(inp.get("cfg_scale", 1.3))
         ddpm_steps = int(inp.get("ddpm_steps", 10))
@@ -68,8 +91,11 @@ def handler(job):
         if isinstance(text, str) and not text.strip().startswith("Speaker"):
             text = f"Speaker 0: {text.strip()}"
 
-        # Locate voice reference files.
-        voice_paths = [_voice_path(n) for n in speaker_names]
+        # Locate or fetch voice reference files.
+        if speaker_audio_url or speaker_audio_b64:
+            voice_paths = [_fetch_speaker_audio(url=speaker_audio_url, b64=speaker_audio_b64)]
+        else:
+            voice_paths = [_voice_path(n) for n in speaker_names]
 
         inputs = PROCESSOR(
             text=[text],
